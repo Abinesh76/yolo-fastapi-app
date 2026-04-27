@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+<h2>Upload Image</h2>
+
+<input type="file" id="file"><br><br>
+
+<h3>Detected Objects</h3>
+<select id="dropdown"></select>
+
+<br><br>
+
+<img id="mask" width="400"/>
+
+<script>
+
+let uploadedFile;
+
+document.getElementById("file").onchange = function(e){
+
+    uploadedFile = e.target.files[0];
+
+    let formData = new FormData();
+    formData.append("file", uploadedFile);
+
+    fetch("/detect",{
+        method:"POST",
+        body:formData
+    })
+    .then(res => res.json())
+    .then(data => {
+
+        let dropdown = document.getElementById("dropdown");
+        dropdown.innerHTML = "";
+
+        data.objects.forEach(obj => {
+            let opt = document.createElement("option");
+            opt.value = obj.id;
+            opt.text = obj.name;
+            dropdown.appendChild(opt);
+        });
+
+    });
+
+};
+
+document.getElementById("dropdown").onchange = function(e){
+
+    let fd = new FormData();
+    fd.append("object_id", e.target.value);
+
+    fetch("/mask",{
+        method:"POST",
+        body:fd
+    })
+    .then(res => res.blob())
+    .then(img => {
+
+        document.getElementById("mask").src =
+            URL.createObjectURL(img);
+
+    });
+
+};
+
+</script>
+
+</body>
+</html>
