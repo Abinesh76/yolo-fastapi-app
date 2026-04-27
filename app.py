@@ -3,10 +3,13 @@ from flask_cors import CORS
 from ultralytics import YOLO
 import cv2
 import numpy as np
+import os
+from io import BytesIO
 
 app = Flask(__name__)
 CORS(app)
 
+# Load YOLO segmentation model
 model = YOLO("yolov8n-seg.pt")
 
 results_global = None
@@ -32,10 +35,9 @@ def detect():
         return jsonify({"error": "No file uploaded"}), 400
 
     file = request.files["file"]
-    filepath = "input.jpg"
-    file.save(filepath)
 
-    image = cv2.imread(filepath)
+    file_bytes = np.frombuffer(file.read(), np.uint8)
+    image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
     if image is None:
         return jsonify({"error": "Invalid image"}), 400
@@ -47,7 +49,7 @@ def detect():
 
     objects = []
 
-    if results_global.boxes is None:
+    if results_global.boxes is None or len(results_global.boxes) == 0:
         return jsonify({"objects": []})
 
     for i, cls in enumerate(results_global.boxes.cls):
@@ -66,16 +68,23 @@ def mask():
     global results_global, height, width
 
     if results_global is None:
-        return jsonify({"error": "Please upload image first"}), 400
+        return jsonify({"error": "Upload image first"}), 400
+
+    if "object_id" not in request.form:
+        return jsonify({"error": "object_id missing"}), 400
 
     obj_id = int(request.form["object_id"])
 
+    if results_global.boxes is None or obj_id >= len(results_global.boxes):
+        return jsonify({"error": "Invalid object_id"}), 400
+
+    # Use real segmentation mask if available
     if results_global.masks is not None:
         mask_data = results_global.masks.data[obj_id].cpu().numpy()
-
         mask_resized = cv2.resize(mask_data, (width, height))
         mask_output = (mask_resized * 255).astype(np.uint8)
 
+    # Fallback: bounding-box mask
     else:
         box = results_global.boxes.xyxy[obj_id].cpu().numpy()
         x1, y1, x2, y2 = map(int, box)
@@ -83,11 +92,17 @@ def mask():
         mask_output = np.zeros((height, width), dtype=np.uint8)
         mask_output[y1:y2, x1:x2] = 255
 
-    output_path = "mask.png"
-    cv2.imwrite(output_path, mask_output)
+    success, buffer = cv2.imencode(".png", mask_output)
 
-    return send_file(output_path, mimetype="image/png")
+    if not success:
+        return jsonify({"error": "Failed to create mask"}), 500
+
+    return send_file(
+        BytesIO(buffer),
+        mimetype="image/png"
+    )
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
