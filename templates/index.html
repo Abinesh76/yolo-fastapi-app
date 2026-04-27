@@ -1,10 +1,13 @@
 <!DOCTYPE html>
 <html>
+<head>
+    <title>YOLO Object Mask App</title>
+</head>
 <body>
 
 <h2>Upload Image</h2>
 
-<input type="file" id="file"><br><br>
+<input type="file" id="file" accept="image/*"><br><br>
 
 <h3>Detected Objects</h3>
 <select id="dropdown">
@@ -13,6 +16,7 @@
 
 <br><br>
 
+<h3>Mask Output</h3>
 <img id="mask" width="400"/>
 
 <script>
@@ -31,16 +35,34 @@ document.getElementById("file").onchange = function(e) {
         let dropdown = document.getElementById("dropdown");
         dropdown.innerHTML = "";
 
+        if (data.objects.length === 0) {
+            let opt = document.createElement("option");
+            opt.text = "No objects detected";
+            dropdown.appendChild(opt);
+            return;
+        }
+
+        let defaultOpt = document.createElement("option");
+        defaultOpt.text = "Select object";
+        defaultOpt.value = "";
+        dropdown.appendChild(defaultOpt);
+
         data.objects.forEach(obj => {
             let opt = document.createElement("option");
             opt.value = obj.id;
-            opt.text = obj.name + " " + obj.id;
+            opt.text = obj.name + " - ID " + obj.id;
             dropdown.appendChild(opt);
         });
+    })
+    .catch(err => {
+        alert("Detection failed");
+        console.error(err);
     });
 };
 
 document.getElementById("dropdown").onchange = function(e) {
+    if (!e.target.value) return;
+
     let fd = new FormData();
     fd.append("object_id", e.target.value);
 
@@ -51,6 +73,10 @@ document.getElementById("dropdown").onchange = function(e) {
     .then(res => res.blob())
     .then(img => {
         document.getElementById("mask").src = URL.createObjectURL(img);
+    })
+    .catch(err => {
+        alert("Mask generation failed");
+        console.error(err);
     });
 };
 </script>
