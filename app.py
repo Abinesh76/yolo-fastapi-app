@@ -1,81 +1,65 @@
-from flask import Flask, request, jsonify, send_file, render_template
-from flask_cors import CORS
+import gradio as gr
 from ultralytics import YOLO
 import cv2
 import numpy as np
-import os
 
-app = Flask(__name__)
-CORS(app)
+model = YOLO("yolov8n.pt")
 
-model = YOLO("yolov8n-seg.pt")
+def detect_and_mask(image, selected_object):
 
-results_global = None
-height = None
-width = None
-
-
-# HOME PAGE
-@app.route('/')
-def home():
-    return render_template("index.html")
-
-
-# HEALTH CHECK
-@app.route('/health')
-def health():
-    return jsonify({"status": "ok"})
-
-
-# DETECT OBJECTS
-@app.route('/detect', methods=['POST'])
-def detect():
-    global results_global, height, width
-
-    file = request.files['file']
-
-    filepath = "input.jpg"
-    file.save(filepath)
-
-    image = cv2.imread(filepath)
-    height, width = image.shape[:2]
-
-    results = model(image)
-    results_global = results[0]
+    results = model(image)[0]
 
     objects = []
+    boxes = []
 
-    for i, cls in enumerate(results_global.boxes.cls):
-        label = model.names[int(cls)]
+    for i, box in enumerate(results.boxes):
+        cls_id = int(box.cls[0])
+        label = model.names[cls_id]
+        objects.append(f"{i}-{label}")
+        boxes.append(box.xyxy[0].cpu().numpy())
 
-        objects.append({
-            "id": i,
-            "name": label
-        })
+    if selected_object is None:
+        return image, objects
 
-    return jsonify({"objects": objects})
+    obj_id = int(selected_object.split("-")[0])
+    box = boxes[obj_id]
 
-
-# MASK OBJECT
-@app.route('/mask', methods=['POST'])
-def mask():
-    global results_global, height, width
-
-    obj_id = int(request.form['object_id'])
-
-    box = results_global.boxes.xyxy[obj_id].cpu().numpy()
-
-    mask = np.zeros((height, width), dtype=np.uint8)
+    mask = np.zeros(image.shape[:2], dtype=np.uint8)
 
     x1, y1, x2, y2 = map(int, box)
-
     mask[y1:y2, x1:x2] = 255
 
-    output_path = "mask.png"
-    cv2.imwrite(output_path, mask)
+    result_img = image.copy()
+    result_img[mask == 0] = 0
 
-    return send_file(output_path, mimetype='image/png')
+    return result_img, objects
 
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000)
+with gr.Blocks() as demo:
+
+    gr.Markdown("## YOLO Object Detection + Mask")
+
+    image_input = gr.Image(type="numpy")
+    dropdown = gr.Dropdown(label="Select Object", choices=[])
+    output_image = gr.Image()
+
+    btn = gr.Button("Detect")
+
+    def detect(image):
+        results = model(image)[0]
+
+        objects = []
+        for i, box in enumerate(results.boxes):
+            cls_id = int(box.cls[0])
+            label = model.names[cls_id]
+            objects.append(f"{i}-{label}")
+
+        return objects
+
+    btn.click(detect, inputs=image_input, outputs=dropdown)
+
+    dropdown.change(detect_and_mask,
+                    inputs=[image_input, dropdown],
+                    outputs=[output_image, dropdown])
+
+demo.launch()
